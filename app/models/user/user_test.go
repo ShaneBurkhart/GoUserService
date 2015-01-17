@@ -1,5 +1,8 @@
 package user
 
+// TODO Validate email has an @
+// TODO Validate email is unique
+
 import (
 	"github.com/ShaneBurkhart/GoUserService/config"
 	"log"
@@ -8,6 +11,7 @@ import (
 
 const email = "user@example.com"
 const password = "password"
+const id = 1
 
 func initDB() {
 	err := config.SetupDB()
@@ -19,6 +23,10 @@ func initDB() {
 		log.Fatal(err)
 		return
 	}
+	clearDB()
+}
+
+func clearDB() {
 	if _, err := config.DB.Exec("DELETE FROM users"); err != nil {
 		log.Fatal(err)
 		return
@@ -29,63 +37,93 @@ func closeDB() {
 	config.CloseDB()
 }
 
-func createUser(email string, password string) int {
+func createDefaultUser() int {
 	return Create(email, password)
+}
+
+var countTests = []struct {
+	in  int
+	out int
+}{
+	{1, 1},
+	{3, 3},
 }
 
 func TestCount(t *testing.T) {
 	initDB()
+	defer closeDB()
 
-	createUser(email, password)
-
-	if c := Count(); c != 1 {
-		t.Error("Expected 1 but got", c)
+	for _, test := range countTests {
+		clearDB()
+		for i := 0; i < test.in; i++ {
+			createDefaultUser()
+		}
+		if c := Count(); c != test.out {
+			t.Error("Incorrect count. Expected:", test.out, "Got:", c)
+		}
 	}
-
-	closeDB()
-}
-
-func TestCreate(t *testing.T) {
-	initDB()
-
-	i := Count()
-	createUser(email, password)
-	if c := Count(); c != i+1 {
-		t.Error("User not created. Initial count was", i, "and final count was", c)
-	}
-
-	closeDB()
-}
-
-func TestPasswordHash(t *testing.T) {
-	initDB()
-
-	var digest string
-	i := createUser(email, password)
-	err := config.DB.QueryRow(`
-		SELECT password_digest
-		FROM users
-		WHERE id = $1
-	`, i).Scan(&digest)
-	if err != nil {
-		t.Error("There was a problem getting user with id", i, "from the database.")
-	}
-
-	if digest == password {
-		t.Error("The password was not hashed when put into the table.")
-	}
-
-	closeDB()
 }
 
 func TestFind(t *testing.T) {
 	initDB()
+	defer closeDB()
+	i := createDefaultUser()
 
-	i := createUser(email, password)
 	u := Find(i)
-	if u == nil || u.Email != email || u.Id != i {
-		t.Error("Didn't get correct user. Expected: &{", i, email, "} Got:", u)
+
+	if u == nil {
+		t.Error("Didn't find user with Id:", i)
+	} else {
+		if u.Email != email {
+			t.Error("Emails don't match. Expected:", email, "Got:", u.Email)
+		}
+		if u.Id != i {
+			t.Error("Ids don't match. Expected:", i, "Got:", u.Id)
+		}
+		if err := comparePassword(u, password); err != nil {
+			t.Error("Passwords don't match.")
+		}
 	}
 
-	closeDB()
+	// Returns nil when doesn't exist
+	u = Find(i + 1)
+	if u != nil {
+		t.Error("User should be nil. Expected:", nil, "Got:", u)
+	}
+}
+
+var createTests = []struct {
+	email    string
+	password string
+}{
+	{"email@domain.com", "password"},
+	{"user@anotherdomain.com", "H3llo"},
+}
+
+func TestCreate(t *testing.T) {
+	initDB()
+	defer closeDB()
+
+	for _, test := range createTests {
+		clearDB()
+		initialCount := Count()
+
+		i := Create(test.email, test.password)
+
+		u := Find(i)
+		if u == nil {
+			t.Error("User didn't get created.")
+		} else {
+			if u.Email != test.email {
+				t.Error("Emails don't match. Expected:", test.email, "Got:", u.Email)
+			}
+			if err := comparePassword(u, test.password); err != nil {
+				t.Error("Password wasn't properly hashed.")
+			}
+		}
+
+		if c := Count(); c != initialCount+1 {
+			t.Error("Initial user count was", initialCount, "and final user count was", c)
+		}
+	}
 }

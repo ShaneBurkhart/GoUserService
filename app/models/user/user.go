@@ -12,7 +12,7 @@ const countSQL = `
 	FROM users`
 
 const findByIdSQL = `
-	SELECT id, email
+	SELECT *
 	FROM users
 	WHERE id = $1`
 
@@ -25,8 +25,9 @@ const insertUserSQL = `
 	) RETURNING id`
 
 type User struct {
-	Id    int
-	Email string
+	Id             int
+	Email          string
+	PasswordDigest string
 }
 
 func Count() int {
@@ -40,9 +41,11 @@ func Count() int {
 
 func Find(id int) *User {
 	u := User{}
-	err := config.DB.QueryRow(findByIdSQL, id).Scan(&u.Id, &u.Email)
-	if err != nil && err != sql.ErrNoRows {
-		//TODO What to do if no rows
+	err := config.DB.QueryRow(findByIdSQL, id).Scan(&u.Id, &u.Email, &u.PasswordDigest)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
 		//TODO Logging
 		log.Fatal(err)
 	}
@@ -51,7 +54,6 @@ func Find(id int) *User {
 }
 
 func Create(email string, password string) int {
-	// TODO bcrypt password hashing
 	var id int
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -60,8 +62,13 @@ func Create(email string, password string) int {
 
 	err = config.DB.QueryRow(insertUserSQL, email, passwordHash).Scan(&id)
 	if err != nil {
+		// TODO If error, it means validation was probably wrong.  Return nil
 		// TODO Logging
 		log.Fatal(err)
 	}
 	return id
+}
+
+func comparePassword(u *User, password string) error {
+	return bcrypt.CompareHashAndPassword([]byte(u.PasswordDigest), []byte(password))
 }
