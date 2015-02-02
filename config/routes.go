@@ -7,7 +7,8 @@ import (
 )
 
 func SetupRoutes(r *mux.Router) {
-	r.HandleFunc("/user/{id}", controllers.EmailController).Methods("GET")
+	// TODO Test that only works when id is number
+	r.HandleFunc("/user/{id:[0-9]+}", controllers.EmailController).Methods("GET")
 
 	r.HandleFunc("/register", controllers.RegisterController).Methods("POST")
 	r.HandleFunc("/login", controllers.LoginController).Methods("POST")
