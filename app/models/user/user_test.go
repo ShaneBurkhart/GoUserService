@@ -4,6 +4,8 @@ package user
 // TODO Validate email is unique
 
 import (
+	"errors"
+	"fmt"
 	"github.com/ShaneBurkhart/GoUserService/config"
 	"log"
 	"testing"
@@ -37,29 +39,27 @@ func closeDB() {
 	config.CloseDB()
 }
 
-func createDefaultUser() int {
+func createDefaultUser() (int, error) {
 	return Create(email, password)
 }
 
 var countTests = []struct {
-	in  int
-	out int
+	email string
 }{
-	{1, 1},
-	{3, 3},
+	{"user@domain.com"},
+	{"example@domain.com"},
+	{"me@example.com"},
+	{"you@example.com"},
 }
 
 func TestCount(t *testing.T) {
 	initDB()
 	defer closeDB()
 
-	for _, test := range countTests {
-		clearDB()
-		for i := 0; i < test.in; i++ {
-			createDefaultUser()
-		}
-		if c := Count(); c != test.out {
-			t.Error("Incorrect count. Expected:", test.out, "Got:", c)
+	for i, test := range countTests {
+		Create(test.email, password)
+		if c := Count(); c != i+1 {
+			t.Error("Incorrect count. Expected:", i+1, "Got:", c)
 		}
 	}
 }
@@ -67,22 +67,13 @@ func TestCount(t *testing.T) {
 func TestFind(t *testing.T) {
 	initDB()
 	defer closeDB()
-	i := createDefaultUser()
+	i, _ := createDefaultUser()
 
 	u := Find(i)
 
-	if u == nil {
-		t.Error("Didn't find user with Id:", i)
-	} else {
-		if u.Email != email {
-			t.Error("Emails don't match. Expected:", email, "Got:", u.Email)
-		}
-		if u.Id != i {
-			t.Error("Ids don't match. Expected:", i, "Got:", u.Id)
-		}
-		if err := comparePassword(u, password); err != nil {
-			t.Error("Passwords don't match.")
-		}
+	err := verifyUser(u, i, email, password)
+	if err != nil {
+		t.Error(err)
 	}
 
 	// Returns nil when doesn't exist
@@ -93,11 +84,18 @@ func TestFind(t *testing.T) {
 }
 
 var createTests = []struct {
-	email    string
-	password string
+	email       string
+	password    string
+	shouldError bool
 }{
-	{"email@domain.com", "password"},
-	{"user@anotherdomain.com", "H3llo"},
+	{"email@domain.com", "password", false},
+	{"email@domain.com", "foo", true}, // Duplicate email
+	{"user@anotherdomain.com", "H3llo", false},
+	{"useranotherdomain.com", "H3lloWorld", true},  // Invalid email format
+	{"@useranotherdomain.com", "H3lloWorld", true}, // Invalid email format
+	{"useranotherdomain@", "H3lloWorld", true},     // Invalid email format
+	{"", "H3lloWorld", true},
+	{"user@anotherdomain.com", "", true},
 }
 
 func TestCreate(t *testing.T) {
@@ -105,25 +103,49 @@ func TestCreate(t *testing.T) {
 	defer closeDB()
 
 	for _, test := range createTests {
-		clearDB()
 		initialCount := Count()
 
-		i := Create(test.email, test.password)
+		i, err := Create(test.email, test.password)
+
+		if err != nil && test.shouldError {
+			continue
+		}
+		if err != nil && !test.shouldError {
+			t.Error("There was an error when there shouldn't have been. Error:",
+				err, "Test:", test)
+			continue
+		}
+		if err == nil && test.shouldError {
+			t.Error("There wasn't an error when there should have been. Error:",
+				err, "Test:", test)
+			continue
+		}
 
 		u := Find(i)
-		if u == nil {
-			t.Error("User didn't get created.")
-		} else {
-			if u.Email != test.email {
-				t.Error("Emails don't match. Expected:", test.email, "Got:", u.Email)
-			}
-			if err := comparePassword(u, test.password); err != nil {
-				t.Error("Password wasn't properly hashed.")
-			}
+		err = verifyUser(u, i, test.email, test.password)
+		if err != nil {
+			t.Error(err)
 		}
 
 		if c := Count(); c != initialCount+1 {
-			t.Error("Initial user count was", initialCount, "and final user count was", c)
+			t.Error("Initial user count was", initialCount,
+				"and final user count was", c)
 		}
 	}
+}
+
+func verifyUser(u *User, id int, email string, password string) error {
+	if u == nil {
+		return errors.New("User is nil.")
+	}
+	if u.Id != id {
+		return errors.New(fmt.Sprintf("Ids don't match. Expected: %d, Got: %d", id, u.Id))
+	}
+	if u.Email != email {
+		return errors.New(fmt.Sprintf("Emails don't match. Expected: %s, Got: %s", email, u.Email))
+	}
+	if err := comparePassword(u, password); err != nil {
+		return errors.New("Passwords don't match.")
+	}
+	return nil
 }
